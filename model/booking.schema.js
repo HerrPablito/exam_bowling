@@ -3,26 +3,27 @@ const moment = require('moment');
 const uuid = require('uuid-random')
 
 
-function formatBookingTime(year, month, day, hour) {
-    const startTime = moment(`${year}-${month}-${day} ${hour}:00`, 'YYYY-M-D HH:mm');
-    const endTime = startTime.clone().add(1, 'hour');
-    const endHour = endTime.format('HH');
-
-    return startTime.format('YYYY-MM-DD [kl:] HH [till kl: ]') + endHour;
-  }
 
 const bookingSchema = new mongoose.Schema({
     email: {
         required: true,
         type: String,
     },
-    timeToBowl: {
+    startTime: {
         required: true,
-        type: String,
-        set: function (timeObj) {
-          return formatBookingTime(timeObj.year, timeObj.month, timeObj.day, timeObj.hour);
+        type: Date,
+        set: function(timeObj) {
+            return moment(`${timeObj.year}-${timeObj.month}-${timeObj.day} ${timeObj.hour}:00`, 'YYYY-MM-DD HH:mm').toDate();
         },
-      },
+    },
+    endTime: {
+        required: true,
+        type: Date,
+        set: function(timeObj) {
+            const startTime = moment(`${timeObj.year}-${timeObj.month}-${timeObj.day} ${timeObj.hour}:00`, 'YYYY-MM-DD HH:mm');
+            return startTime.clone().add(1, 'hour').toDate();
+        },
+    },
     numberOfPlayers: {
         required: true,
         type: Number,
@@ -44,7 +45,30 @@ const bookingSchema = new mongoose.Schema({
     bookedLanes: {
         required: true,
         type: [String],
-    },
+        validator: async function (bookedLanes) {
+            const allLanes = await Lane.find();
+            const numberOfLanes = this.numberOfLanes;
+          
+            const startTime = moment(this.timeToBowl, 'YYYY-MM-DD HH:mm').toDate();
+            const endTime = moment(startTime).add(1, 'hour').toDate();
+
+            const availableLanes = allLanes.filter(lane => {
+              return !lane.bookings.some(booking => {
+                return (
+                  (startTime >= booking.startTime && startTime < booking.endTime) ||
+                  (endTime > booking.startTime && endTime <= booking.endTime)
+                );
+              });
+            });
+
+            if (availableLanes.length < numberOfLanes) {
+              return false;
+            }
+          
+            return true;
+          }
+        
+        },
     totalCost: {
         required: true,
         type: Number,
@@ -59,4 +83,4 @@ const bookingSchema = new mongoose.Schema({
 
 
 
-module.exports = mongoose.model('booking', bookingSchema);
+module.exports = mongoose.model('Booking', bookingSchema);
