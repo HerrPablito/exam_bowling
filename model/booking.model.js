@@ -7,7 +7,6 @@ const moment = require('moment');
 async function newBooking(email, timeToBowl, numberOfPlayers, numberOfLanes, shoeSize) {
 
   const allLanes = await Lane.find();
-
   const startTime = moment(`${timeToBowl.year}-${timeToBowl.month}-${timeToBowl.day} ${timeToBowl.hour}:00`, 'YYYY-MM-DD HH:mm');
   const endTime = startTime.clone().add(1, 'hour');
 
@@ -93,8 +92,16 @@ async function updateBookedLanes(booking, newNumberOfLanes) {
 
 
 async function updateBooking(bookingId, email, timeToBowl, numberOfPlayers, numberOfLanes, shoeSize) {
+
   const booking = await Booking.findOne({ bookingId: bookingId });
 
+
+  const totalLaneCost = numberOfLanes * 100;
+  const totalPlayerCost = numberOfPlayers * 120;
+  const totalCost = totalLaneCost + totalPlayerCost;
+
+  const bookedLanes = await updateLanesArr(timeToBowl, numberOfLanes, bookingId);
+  console.log("bookedLanes:", bookedLanes)
   if (booking) {
     booking.email = email;
     booking.startTime = timeToBowl;
@@ -102,9 +109,11 @@ async function updateBooking(bookingId, email, timeToBowl, numberOfPlayers, numb
     booking.numberOfPlayers = numberOfPlayers;
     booking.numberOfLanes = numberOfLanes;
     booking.shoeSize = shoeSize;
-    if (booking.numberOfLanes !== numberOfLanes) {
-      await updateBookedLanes(booking, numberOfLanes);
-    }
+    booking.totalCost = totalCost;
+    booking.bookedLanes = bookedLanes;
+    // if (booking.numberOfLanes !== numberOfLanes) {
+    //   await updateBookedLanes(booking, numberOfLanes);
+    // }
     const updatedBooking = await booking.save();
     return updatedBooking;
 
@@ -112,6 +121,61 @@ async function updateBooking(bookingId, email, timeToBowl, numberOfPlayers, numb
 
   return null;
 }
+
+async function updateLanesArr(timeToBowl, numberOfLanes, bookingId) {
+
+  const myBooking = await Booking.findOne({ bookingId: bookingId });
+  //console.log("myBooking:", myBooking)
+  const startTime = moment(`${timeToBowl.year}-${timeToBowl.month}-${timeToBowl.day} ${timeToBowl.hour}:00`, 'YYYY-MM-DD HH:mm');
+  const endTime = startTime.clone().add(1, 'hour');
+
+  const deleteLanes = await Lane.updateMany(
+    { laneId: myBooking.bookedLanes },
+    //console.log("myBooking.bookedLanes:", myBooking.bookedLanes),
+    {
+      $pull: {
+        bookings: {
+          startTime: myBooking.startTime,
+          endTime: myBooking.endTime,
+        },
+      },
+    }
+  );console.log("deleteLanes.modifiedCount:", deleteLanes.modifiedCount);
+  let bookedLanes = [];
+  if (deleteLanes.modifiedCount > 0) {
+    const allLanes = await Lane.find();
+    const availableLanes = allLanes.filter(lane => {
+      return !lane.bookings.some(booking => {
+        const bookingStartTime = moment(booking.startTime, 'YYYY-MM-DD HH:mm');
+        const bookingEndTime = moment(booking.endTime, 'YYYY-MM-DD HH:mm');
+        return (
+          startTime.isBetween(bookingStartTime, bookingEndTime, undefined, '[)') ||
+          endTime.isBetween(bookingStartTime, bookingEndTime, undefined, '(]')
+        );
+      });console.log("deleteLanes:", deleteLanes)
+    });
+
+    if (availableLanes.length < numberOfLanes) {
+      throw new Error('Det finns inte tillräckligt med lediga banor');
+      //console.log("availableLanes.length:", availableLanes.length); 
+    }
+
+    
+
+    for (let i = 0; i < numberOfLanes; i++) {
+      const lane = availableLanes[i];
+      lane.bookings.push({ startTime: startTime.toISOString(), endTime: endTime.toISOString() });
+      await lane.save();
+      bookedLanes.push(lane.laneId);
+    }
+    
+  } else {
+    console.log("test");
+    bookedLanes = myBooking.bookedLanes;
+  } console.log("Returning bookedLanes:", bookedLanes); 
+  return bookedLanes;
+}
+
 
 async function getBookingByDate(startDate, endDate) {
 
